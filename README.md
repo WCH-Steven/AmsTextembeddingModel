@@ -1,4 +1,4 @@
-# AmsTextembeddingModel
+<img width="811" alt="image" src="https://github.com/user-attachments/assets/fa816dc4-50dc-4f0e-a225-2388073b7d7b"># AmsTextembeddingModel
 Tencent AMS General Text Embeddings Model Factory, Brilliant Ads Retrieval Model
 Abstract
 对于不同类型的内容理解任务，此前的业界方案普遍分为在线召回和在线分类两种：
@@ -14,7 +14,8 @@ Classification solutions are aimed at label classification problems with hierarc
 In the era of large language models, content understanding tasks have undergone earth-shaking changes in terms of understanding frameworks, understanding logic, and understanding effects.
 The real-time process of light chains performs real-time recall of content labels through online LLM understanding + BERT recall.
 The offline process of heavy chains caches the accurately recalled content labels through multiple large model stages into the online query library, and achieves real-time recall of content labels through the method of expanding cache and similarity mapping.
-https://doc.weixin.qq.com/flowchart-addon
+<img width="811" alt="image" src="https://github.com/user-attachments/assets/af87bb47-1462-4c14-bb86-962483a29d1a">
+
 无论哪一种方案，一个优质的bert都可以帮助理解结果和理解效率事半功倍，马到成功。
 
 No matter which plan, a high-quality BERT can help understand the results and double the efficiency of understanding, leading to immediate success.
