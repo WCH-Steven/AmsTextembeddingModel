@@ -1,270 +1,70 @@
-# Embedding Model
+## Tencent AMS General Text Embeddings Model Factory, Brilliant Ads Retrieval Model
+# Abstract
+对于不同类型的内容理解任务，此前的业界方案普遍分为在线召回和在线分类两种：
+1）召回方案面向没有明显层级结构的大规模标签分配问题，通用结构就是相似度检索倒排后进行判定留存。
+2）分类方案面向标签具有层级结构的标签分类问题，业界方案普遍基于预训练好的bert进行逐级的分类问题，具体方案包括模糊递进，模型交叉共享等方案。
+大模型时代，内容理解任务从理解框架，理解逻辑到理解效果都有了翻天覆地的变化。
+轻链路的实时流程通过在线的llm理解+bert召回做内容标签实时召回。
+重链路的离线流程则通过多次大模型环节精准召回内容标签后缓存到线上的查询库，通过扩大缓存+相似映射的方法得打内容标签的实时召回。
+
+For different types of content understanding tasks, previous industry solutions are generally divided into two categories: online recall and online classification:
+Recall solutions are aimed at large-scale label assignment problems without obvious hierarchical structures. The general structure is to perform similarity retrieval and then determine retention based on the inverted index.
+Classification solutions are aimed at label classification problems with hierarchical structures. Industry solutions generally use pre-trained BERT for step-by-step classification problems. Specific solutions include fuzzy progression, model cross-sharing, and other methods.
+In the era of large language models, content understanding tasks have undergone earth-shaking changes in terms of understanding frameworks, understanding logic, and understanding effects.
+The real-time process of light chains performs real-time recall of content labels through online LLM understanding + BERT recall.
+The offline process of heavy chains caches the accurately recalled content labels through multiple large model stages into the online query library, and achieves real-time recall of content labels through the method of expanding cache and similarity mapping.
 
 
-## Frequently asked questions
+<img width="811" alt="image" src="https://github.com/user-attachments/assets/af87bb47-1462-4c14-bb86-962483a29d1a">
 
-**The very poor results caused by incorrect usage**
+无论哪一种方案，一个优质的bert都可以帮助理解结果和理解效率事半功倍，马到成功。
 
-Different from other embedding models using mean pooling, BGE uses the last hidden state of `[cls]` as the sentence embedding: `sentence_embeddings = model_output[0][:, 0]`.
-If you use mean pooling, there will be a significant decrease in performance. 
-Therefore, make sure to use the correct method to obtain sentence vectors. You can refer to the usage method we provide. 
+No matter which plan, a high-quality BERT can help understand the results and double the efficiency of understanding, leading to immediate success.
+Introduction
+基于大模型的内容理解流程在ams广告场景取得了显著效果，各场景都在llm理解文本信息生成summary后，基于通用文本表示向量召回这一流程下，显著提高了对应场景内容理解标签的关联率和准确率。
 
+The content understanding process based on large models has achieved significant results in the AMS advertising scenario. In all scenarios, after the LLM understands the text information and generates a summary, the process of recalling based on a common text representation vector significantly improves the association rate and accuracy of the corresponding scenario's content understanding labels.
+如果说大模型的理解能力决定了内容理解任务的天花板，召回模型的准确率则决定了内容理解的下限，想输出标准结果给下游任务使用，embedding的质量至关重要。
+为了提高视频号场景内容理解任务的稳定性，帮助内容理解标签在下有任务中起到更大的效果，起到更好的作用，我们从数据，模型结构，训练策略三个角度进行优化和实验验证：
+1.数据上我们通过规则+策略召回大量搜索query-点击item数据，llm多轮投票的方法获取可靠的正/富样本对，扩充海量的视频号场景数据，学习专有生态下的文章风格和文本知识，大幅度增强训练数据。
+2.模型结果上，我们对基于正样本的infoNCE训练框架进行了结构优化，扩充了负样本的学习方式，通过在负采样batch重拼接dummy pair并改进了loss中的temperature规则，显著扩充了模型对生产样本的学习能力。
+3.训练策略上，我们通过对不同任务添加instrcut前缀，区分不同任务的召回逻辑，让模型自适应的学到不同任务的差距，从而帮助模型在多任务训练互相兼容，彼此解耦。
+4.此外，我们基于LLM Cocktail探索了在时间紧急，资源不足的情况下，对历史模型基于融合方式快速得到效果提升的方法。
+最终在人工标注数据集中的各个字段都有了全面的效果提升，其中类目准确率从52%提升到了77%。
 
+If the understanding ability of large models determines the ceiling of content understanding tasks, then the accuracy of the recall model determines the lower limit of content understanding. To output standard results for downstream tasks, the quality of embeddings is crucial.
+To improve the stability of the content understanding task in the video number scenario and help the content understanding labels play a greater role and function better in downstream tasks, we optimize and experimentally verify from three perspectives: data, model structure, and training strategy:
+In terms of data, we recall a large amount of search query-click item data through rules and strategies, and obtain reliable positive/rich sample pairs through the multi-round voting method of LLM, expanding the massive video number scenario data, learning the article style and text knowledge under the proprietary ecosystem, and greatly enhancing the training data.
+In terms of model structure, we have optimized the infoNCE training framework based on positive samples, expanded the learning method of negative samples, significantly expanded the model's learning ability for production samples by re-splicing dummy pairs in the negative sampling batch and improving the temperature rule in the loss.
+In terms of training strategy, we add the instrcut prefix to different tasks to distinguish the recall logic of different tasks, allowing the model to adaptively learn the gap between different tasks, thereby helping the model to be compatible with each other in multi-task training and decouple from each other.
+In addition, based on LLM Cocktail, we explored the method of quickly improving the effect based on the fusion method for historical models in the case of urgent time and insufficient resources.
+Ultimately, comprehensive improvements have been made in various fields in the manually annotated dataset, among which the category accuracy has increased from 52% to 77%.
+Pre Work
+内容理解任务的第一个通用文本向量模型基于m3e-large在文章-概念，搜索-点击，小程序-类目等通用文本对上基于batch负采样作增量训练迭代而得。
+搜索场景的通用文本向量模型则放弃了各场景的通用文本对，通过商品中台积累的商品描述文本和对应的类目标签做增量生成，通过在loss中引入angular margin差异化训练样本提高了预训练的收敛速度和embedding质量。通过reshape采样batch扩大正样本的感受视野，提高了小样本下场景迁移的学习效率。
 
-**1. How to fine-tune bge embedding model?**
+The first universal text vector model for content understanding tasks is based on m3e-large and is obtained through incremental training iterations on general text pairs such as article-concept, search-click, mini-program-category, etc., using batch negative sampling.
+The universal text vector model for search scenarios gives up the general text pairs of each scenario and generates incrementally through the product description text accumulated by the product middle platform and the corresponding category tags. By introducing angular margin into the loss to differentiate training samples, the convergence speed of pre-training and the quality of embeddings are improved. By reshaping the sampling batch to expand the receptive field of positive samples, the learning efficiency of scene transfer under small samples is improved.
+Our Work
+negatives dummy inhenced
+视频号场景的数据基于召回样本基于大模型进行相关性判定，从而得到独立的正样本对和负样本对。
+而传统对比学习主要是基于正样本训练或者将负样本对扩充拼接到原本的softmax的正方形loss矩阵右侧。
+这两种方法负样本都不会学到自己的负相关性，最多只能在分母处传导部分梯度信息。为了解决这个问题，我们将负样本对的的第一列文本作为dummy pos加入训练，人为制造负样本对的正样本关系，从而学习负样本自己负相关性。
 
-Following this [example](https://github.com/FlagOpen/FlagEmbedding/tree/master/examples/finetune) to prepare data and fine-tune your model. 
-Some suggestions:
-- Mine hard negatives following this [example](https://github.com/FlagOpen/FlagEmbedding/tree/master/examples/finetune#hard-negatives), which can improve the retrieval performance.
-- In general, larger hyper-parameter `per_device_train_batch_size` brings better performance. You can expand it by enabling `--fp16`, `--deepspeed df_config.json` (df_config.json can refer to [ds_config.json](https://github.com/FlagOpen/FlagEmbedding/blob/master/examples/finetune/ds_config.json), `--gradient_checkpointing`, etc.
-- If you want to maintain the performance on other tasks when fine-tuning on your data, you can use [LM-Cocktail](https://github.com/FlagOpen/FlagEmbedding/tree/master/LM_Cocktail) to merge the fine-tuned model and the original bge model. Besides, if you want to fine-tune on multiple tasks, you also can approximate the multi-task learning via model merging as [LM-Cocktail](https://github.com/FlagOpen/FlagEmbedding/tree/master/LM_Cocktail).
-- If you pre-train bge on your data, the pre-trained model cannot be directly used to calculate similarity, and it must be fine-tuned with contrastive learning before computing similarity.
-- If the accuracy of the fine-tuned model is still not high, it is recommended to use/fine-tune the cross-encoder model (bge-reranker) to re-rank top-k results. Hard negatives also are needed to fine-tune reranker.
+In the shipinhao scenario, data is based on recall samples and undergoes relevance determination through a large model, thereby obtaining independent positive sample pairs and negative sample pairs.
+Traditional contrastive learning is mainly based on positive sample training or expanding and splicing negative sample pairs to the right side of the original softmax square loss matrix.
+These two methods do not allow negative samples to learn their own negative correlation; at most, they can only transmit some gradient information at the denominator. To solve this problem, we add the first column of text of the negative sample pair as a dummy pos to the training, artificially creating a positive sample relationship for the negative sample pair, thereby learning the negative correlation of the negative sample itself.
 
-Here is the way we used to fine-tune `bge-large-zh-v1.5`: 
-The fine-tuning datasets consist of t2ranking, dulreader, mmarco, cmedqav2, mulit-cpr, nli-zh, ocmnli, and cmnli.
-For t2ranking, dulreader, and mmarco, we mine hard negatives; 
-For nli-zh, ocmnli, and cmnli, we use the pairs whose label equal to 0 as negatives;
-For cmedqav2 and mulit-cpr, we randomly sample negatives.
-The settings of fine-tuning are: train_group_size=2, learning_rate=1e-5, max_epoch=5.
-We train two models: one fine-tune with `--query_instruction_for_retrieval "为这个句子生成表示以用于检索相关文章："`, 
-and the other model is fine-tuned with `--query_instruction_for_retrieval ""`, 
-and then we merge two variants into one model to make the final model can be used both with and without instruction.
+reshape batch
+MoCo3提到基于info-NCE的batch负采样训练效果会随着batch大小而显著变好，由于视频号场景的标题文本较长，attention cache占据内存较大，模型的训练内存被显著压缩，batch的大小原小于搜索场景。
+受siglip启发，我们将batch负采样的矩阵进行分块儿梯度求导，通过减少相似度矩阵的大小，减少内存消耗的情况下扩大batch内正样本的感受野，从而近似达到更大的batch训练效果。
 
+MoCo3 mentions that the training effect of batch negative sampling based on info-NCE will significantly improve with the increase of batch size. Due to the longer title text in the video number scenario and the larger memory occupied by the attention cache, the training memory of the model is significantly compressed, and the batch size is originally smaller than that of the search scenario.
+Inspired by siglip, we perform block gradient derivation on the batch negative sampling matrix. By reducing the size of the similarity matrix and reducing memory consumption, we expand the receptive field of positive samples within the batch, thereby approximately achieving the training effect of a larger batch.
 
-<details>
-  <summary>2. The similarity score between two dissimilar sentences is higher than 0.5</summary>
-
-  <!-- ### The similarity score between two dissimilar sentences is higher than 0.5 -->
-**Suggest to use bge v1.5, which alleviates the issue of the similarity distribution.** 
-
-Since we finetune the models by contrastive learning with a temperature of 0.01, 
-the similarity distribution of the current BGE model is about in the interval \[0.6, 1\].
-So a similarity score greater than 0.5 does not indicate that the two sentences are similar.
-
-For downstream tasks, such as passage retrieval or semantic similarity, 
-**what matters is the relative order of the scores, not the absolute value.**
-If you need to filter similar sentences based on a similarity threshold, 
-please select an appropriate similarity threshold based on the similarity distribution on your data (such as 0.8, 0.85, or even 0.9).
-
-</details>
-
-<details>
-  <summary>3. When does the query instruction need to be used</summary>
-
-  <!-- ### When does the query instruction need to be used -->
-
-For the `bge-*-v1.5`, we improve its retrieval ability when not using instruction. 
-No instruction only has a slight degradation in retrieval performance compared with using instruction. 
-So you can generate embedding without instruction in all cases for convenience.
- 
-For a retrieval task that uses short queries to find long related documents, 
-it is recommended to add instructions for these short queries.
-**The best method to decide whether to add instructions for queries is choosing the setting that achieves better performance on your task.**
-In all cases, the documents/passages do not need to add the instruction. 
-
-</details>
-
-
-## Usage
-
-### Using FlagEmbedding
-
-Install: 
-```
-git clone https://github.com/FlagOpen/FlagEmbedding.git
-cd FlagEmbedding
-pip install -e .
-```
-or: 
-```
-pip install -U FlagEmbedding
-```
- 
-
-```python
-from FlagEmbedding import FlagModel
-sentences_1 = ["样例数据-1", "样例数据-2"]
-sentences_2 = ["样例数据-3", "样例数据-4"]
-model = FlagModel('BAAI/bge-large-zh-v1.5', 
-                  query_instruction_for_retrieval="为这个句子生成表示以用于检索相关文章：",
-                  use_fp16=True) # Setting use_fp16 to True speeds up computation with a slight performance degradation
-embeddings_1 = model.encode(sentences_1)
-embeddings_2 = model.encode(sentences_2)
-similarity = embeddings_1 @ embeddings_2.T
-print(similarity)
-
-# for s2p(short query to long passage) retrieval task, suggest to use encode_queries() which will automatically add the instruction to each query
-# corpus in retrieval task can still use encode() or encode_corpus(), since they don't need instruction
-queries = ['query_1', 'query_2']
-passages = ["样例文档-1", "样例文档-2"]
-q_embeddings = model.encode_queries(queries)
-p_embeddings = model.encode(passages)
-scores = q_embeddings @ p_embeddings.T
-```
-For the value of the argument `query_instruction_for_retrieval`, see [Model List](https://github.com/FlagOpen/FlagEmbedding/tree/master#model-list). 
-
-By default, FlagModel will use all available GPUs when encoding. Please set `os.environ["CUDA_VISIBLE_DEVICES"]` to select specific GPUs.
-You also can set `os.environ["CUDA_VISIBLE_DEVICES"]=""` to make all GPUs unavailable.
-
-
-### Using Sentence-Transformers
-
-You can also use the `bge` models with [sentence-transformers](https://www.SBERT.net):
-
-```
-pip install -U sentence-transformers
-```
-```python
-from sentence_transformers import SentenceTransformer
-sentences_1 = ["样例数据-1", "样例数据-2"]
-sentences_2 = ["样例数据-3", "样例数据-4"]
-model = SentenceTransformer('BAAI/bge-large-zh-v1.5')
-embeddings_1 = model.encode(sentences_1, normalize_embeddings=True)
-embeddings_2 = model.encode(sentences_2, normalize_embeddings=True)
-similarity = embeddings_1 @ embeddings_2.T
-print(similarity)
-```
-For s2p(short query to long passage) retrieval task, 
-each short query should start with an instruction (instructions see [Model List](https://github.com/FlagOpen/FlagEmbedding/tree/master#model-list)). 
-But the instruction is not needed for passages.
-```python
-from sentence_transformers import SentenceTransformer
-queries = ['query_1', 'query_2']
-passages = ["样例文档-1", "样例文档-2"]
-instruction = "为这个句子生成表示以用于检索相关文章："
-
-model = SentenceTransformer('BAAI/bge-large-zh-v1.5')
-q_embeddings = model.encode([instruction+q for q in queries], normalize_embeddings=True)
-p_embeddings = model.encode(passages, normalize_embeddings=True)
-scores = q_embeddings @ p_embeddings.T
-```
-
-### Using Langchain 
-
-You can use `bge` in langchain like this:
-```python
-from langchain.embeddings import HuggingFaceBgeEmbeddings
-model_name = "BAAI/bge-large-en-v1.5"
-model_kwargs = {'device': 'cuda'}
-encode_kwargs = {'normalize_embeddings': True} # set True to compute cosine similarity
-model = HuggingFaceBgeEmbeddings(
-    model_name=model_name,
-    model_kwargs=model_kwargs,
-    encode_kwargs=encode_kwargs,
-    query_instruction="为这个句子生成表示以用于检索相关文章："
-)
-model.query_instruction = "为这个句子生成表示以用于检索相关文章："
-```
-
-
-### Using HuggingFace Transformers
-
-With the transformers package, you can use the model like this: First, you pass your input through the transformer model, then you select the last hidden state of the first token (i.e., [CLS]) as the sentence embedding.
-
-```python
-from transformers import AutoTokenizer, AutoModel
-import torch
-# Sentences we want sentence embeddings for
-sentences = ["样例数据-1", "样例数据-2"]
-
-# Load model from HuggingFace Hub
-tokenizer = AutoTokenizer.from_pretrained('BAAI/bge-large-zh-v1.5')
-model = AutoModel.from_pretrained('BAAI/bge-large-zh-v1.5')
-model.eval()
-
-# Tokenize sentences
-encoded_input = tokenizer(sentences, padding=True, truncation=True, return_tensors='pt')
-# for s2p(short query to long passage) retrieval task, add an instruction to query (not add instruction for passages)
-# encoded_input = tokenizer([instruction + q for q in queries], padding=True, truncation=True, return_tensors='pt')
-
-# Compute token embeddings
-with torch.no_grad():
-    model_output = model(**encoded_input)
-    # Perform pooling. In this case, cls pooling.
-    sentence_embeddings = model_output[0][:, 0]
-# normalize embeddings
-sentence_embeddings = torch.nn.functional.normalize(sentence_embeddings, p=2, dim=1)
-print("Sentence embeddings:", sentence_embeddings)
-```
-
-
-## Evaluation  
-
-`baai-general-embedding` models achieve **state-of-the-art performance on both MTEB and C-MTEB leaderboard!**
-For more details and evaluation tools see our [scripts](https://github.com/FlagOpen/FlagEmbedding/blob/master/C_MTEB/README.md) 
-
-If you want to evaluate the model(or your model) on **your data**, you can refer to this [tool](https://github.com/FlagOpen/FlagEmbedding/tree/master/examples/finetune#6-evaluate-model).
-
-
-- **MTEB**:   
-
-| Model Name |  Dimension | Sequence Length | Average (56) | Retrieval (15) |Clustering (11) | Pair Classification (3) | Reranking (4) |  STS (10) | Summarization (1) | Classification (12) |
-|:----:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| [BAAI/bge-large-en-v1.5](https://huggingface.co/BAAI/bge-large-en-v1.5) | 1024 | 512 |  **64.23** | **54.29** |  46.08 | 87.12 | 60.03 | 83.11 | 31.61 | 75.97 |  
-| [BAAI/bge-base-en-v1.5](https://huggingface.co/BAAI/bge-base-en-v1.5) |  768 | 512 | 63.55 | 53.25 |   45.77 | 86.55 | 58.86 | 82.4 | 31.07 | 75.53 |  
-| [BAAI/bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) |  384 | 512 | 62.17 |51.68 | 43.82 |  84.92 | 58.36 | 81.59 | 30.12 | 74.14 |  
-| [bge-large-en](https://huggingface.co/BAAI/bge-large-en) |  1024 | 512 | 63.98 |  53.9 | 46.98 | 85.8 | 59.48 | 81.56 | 32.06 | 76.21 | 
-| [bge-base-en](https://huggingface.co/BAAI/bge-base-en) |  768 | 512 |  63.36 | 53.0 | 46.32 | 85.86 | 58.7 | 81.84 | 29.27 | 75.27 | 
-| [gte-large](https://huggingface.co/thenlper/gte-large) |  1024 | 512 | 63.13 | 52.22 | 46.84 | 85.00 | 59.13 | 83.35 | 31.66 | 73.33 |
-| [gte-base](https://huggingface.co/thenlper/gte-base) 	|  768 | 512 | 62.39 | 51.14 | 46.2 | 84.57 | 58.61 | 82.3 | 31.17 | 73.01 |
-| [e5-large-v2](https://huggingface.co/intfloat/e5-large-v2) |  1024| 512 | 62.25 | 50.56 | 44.49 | 86.03 | 56.61 | 82.05 | 30.19 | 75.24 |
-| [bge-small-en](https://huggingface.co/BAAI/bge-small-en) |  384 | 512 | 62.11 |  51.82 | 44.31 | 83.78 | 57.97 | 80.72 | 30.53 | 74.37 |  
-| [instructor-xl](https://huggingface.co/hkunlp/instructor-xl) |  768 | 512 | 61.79 | 49.26 | 44.74 | 86.62 | 57.29 | 83.06 | 32.32 | 61.79 |
-| [e5-base-v2](https://huggingface.co/intfloat/e5-base-v2) |  768 | 512 | 61.5 | 50.29 | 43.80 | 85.73 | 55.91 | 81.05 | 30.28 | 73.84 |
-| [gte-small](https://huggingface.co/thenlper/gte-small) |  384 | 512 | 61.36 | 49.46 | 44.89 | 83.54 | 57.7 | 82.07 | 30.42 | 72.31 |
-| [text-embedding-ada-002](https://platform.openai.com/docs/guides/embeddings) | 1536 | 8192 | 60.99 | 49.25 | 45.9 | 84.89 | 56.32 | 80.97 | 30.8 | 70.93 |
-| [e5-small-v2](https://huggingface.co/intfloat/e5-base-v2) | 384 | 512 | 59.93 | 49.04 | 39.92 | 84.67 | 54.32 | 80.39 | 31.16 | 72.94 |
-| [sentence-t5-xxl](https://huggingface.co/sentence-transformers/sentence-t5-xxl) |  768 | 512 | 59.51 | 42.24 | 43.72 | 85.06 | 56.42 | 82.63 | 30.08 | 73.42 |
-| [all-mpnet-base-v2](https://huggingface.co/sentence-transformers/all-mpnet-base-v2) 	|  768 | 514 	| 57.78 | 43.81 | 43.69 | 83.04 | 59.36 | 80.28 | 27.49 | 65.07 |
-| [sgpt-bloom-7b1-msmarco](https://huggingface.co/bigscience/sgpt-bloom-7b1-msmarco) 	|  4096 | 2048 | 57.59 | 48.22 | 38.93 | 81.9 | 55.65 | 77.74 | 33.6 | 66.19 |
-
-
-
-- **C-MTEB**:  
-We create the benchmark C-MTEB for Chinese text embedding which consists of 31 datasets from 6 tasks. 
-Please refer to [C_MTEB](https://github.com/FlagOpen/FlagEmbedding/blob/master/C_MTEB/README.md) for a detailed introduction.
- 
-| Model | Embedding dimension | Avg | Retrieval | STS | PairClassification | Classification | Reranking | Clustering |
-|:-------------------------------|:--------:|:--------:|:--------:|:--------:|:--------:|:--------:|:--------:|:--------:|
-| [**BAAI/bge-large-zh-v1.5**](https://huggingface.co/BAAI/bge-large-zh-v1.5) | 1024 |  **64.53** | 70.46 | 56.25 | 81.6 | 69.13 | 65.84 | 48.99 |  
-| [BAAI/bge-base-zh-v1.5](https://huggingface.co/BAAI/bge-base-zh-v1.5) | 768 |  63.13 | 69.49 | 53.72 | 79.75 | 68.07 | 65.39 | 47.53 |  
-| [BAAI/bge-small-zh-v1.5](https://huggingface.co/BAAI/bge-small-zh-v1.5) | 512 | 57.82 | 61.77 | 49.11 | 70.41 | 63.96 | 60.92 | 44.18 |   
-| [BAAI/bge-large-zh](https://huggingface.co/BAAI/bge-large-zh) | 1024 | 64.20 | 71.53 | 54.98 | 78.94 | 68.32 | 65.11 | 48.39 |
-| [bge-large-zh-noinstruct](https://huggingface.co/BAAI/bge-large-zh-noinstruct) | 1024 | 63.53 | 70.55 | 53 | 76.77 | 68.58 | 64.91 | 50.01 |
-| [BAAI/bge-base-zh](https://huggingface.co/BAAI/bge-base-zh) | 768 | 62.96 | 69.53 | 54.12 | 77.5 | 67.07 | 64.91 | 47.63 |
-| [multilingual-e5-large](https://huggingface.co/intfloat/multilingual-e5-large) | 1024 | 58.79 | 63.66 | 48.44 | 69.89 | 67.34 | 56.00 | 48.23 |
-| [BAAI/bge-small-zh](https://huggingface.co/BAAI/bge-small-zh) | 512 | 58.27 |  63.07 | 49.45 | 70.35 | 63.64 | 61.48 | 45.09 |
-| [m3e-base](https://huggingface.co/moka-ai/m3e-base) | 768 | 57.10 | 56.91 | 50.47 | 63.99 | 67.52 | 59.34 | 47.68 |
-| [m3e-large](https://huggingface.co/moka-ai/m3e-large) | 1024 |  57.05 | 54.75 | 50.42 | 64.3 | 68.2 | 59.66 | 48.88 |
-| [multilingual-e5-base](https://huggingface.co/intfloat/multilingual-e5-base) | 768 | 55.48 | 61.63 | 46.49 | 67.07 | 65.35 | 54.35 | 40.68 |
-| [multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) | 384 | 55.38 | 59.95 | 45.27 | 66.45 | 65.85 | 53.86 | 45.26 |
-| [text-embedding-ada-002(OpenAI)](https://platform.openai.com/docs/guides/embeddings/what-are-embeddings) | 1536 |  53.02 | 52.0 | 43.35 | 69.56 | 64.31 | 54.28 | 45.68 |
-| [luotuo](https://huggingface.co/silk-road/luotuo-bert-medium) | 1024 | 49.37 |  44.4 | 42.78 | 66.62 | 61 | 49.25 | 44.39 |
-| [text2vec-base](https://huggingface.co/shibing624/text2vec-base-chinese) | 768 |  47.63 | 38.79 | 43.41 | 67.41 | 62.19 | 49.45 | 37.66 |
-| [text2vec-large](https://huggingface.co/GanymedeNil/text2vec-large-chinese) | 1024 | 47.36 | 41.94 | 44.97 | 70.86 | 60.66 | 49.16 | 30.02 |
-
-
-
-## Acknowledgement
-
-Part of the code is developed based on [Dense](https://github.com/luyug/Dense).
-
-
-## Citation
-
-If you find this repository useful, please consider giving a star :star: and citation
-
-```
-@misc{bge_embedding,
-      title={C-Pack: Packaged Resources To Advance General Chinese Embedding}, 
-      author={Shitao Xiao and Zheng Liu and Peitian Zhang and Niklas Muennighoff},
-      year={2023},
-      eprint={2309.07597},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL}
-}
-```
-
-
-
+task identity instruct
+对不同类型的样本加instruct前缀处理，让模型在学习的时候可以区分任务类型，针对性学习匹配模式。
+the formulation of temperature for batch size and negatives train startup
+由于负样本的加入，为了最大程度利用负样本信息，我们在原本的batch把负样本拼接到了尾部，避免负样本对自身的关系被彻底消融。
+伴随而来的问题则是dummy pair本身的相似度太高，在weclip默认的最优温度0.05下，负样本的相似度<0.8即可以得到较低的loss。
+为了解决这个问题，我们通过约束正样本和负样本的期望相似度，基于batch推导了对应的温度关系公式，从而大大增加负样本对对训练的帮助。
